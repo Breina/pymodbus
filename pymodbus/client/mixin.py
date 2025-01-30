@@ -767,8 +767,12 @@ class ModbusClientMixin(Generic[T]):  # pylint: disable=too-many-public-methods
         :raises ParameterException: when the specified string encoding is not supported
         """
         if data_type == cls.DATATYPE.BITS:
+            if not isinstance(value, list):
+                raise TypeError(f"Value should be list of bool but is {type(value)}.")
             byte_list = cls._convert_from_bits(value)
         elif data_type == cls.DATATYPE.STRING:
+            if not isinstance(value, str):
+                raise TypeError(f"Value should be string but is {type(value)}.")
             byte_list = cls._convert_from_string(value, string_encoding)
         else:
             byte_list = cls._convert_from_number(data_type, value)
@@ -782,9 +786,6 @@ class ModbusClientMixin(Generic[T]):  # pylint: disable=too-many-public-methods
 
     @classmethod
     def _convert_from_bits(cls, value: list[bool] | list[int] | list[float]) -> bytes:
-        if not isinstance(value, list):
-            raise TypeError(
-                f"Value should be list of bool but is {type(value)}.")
         if (missing := len(value) % 16):
             value = value + [False] * (16 - missing)
         byte_list = pack_bitstring(cast(list[bool], value))
@@ -792,8 +793,6 @@ class ModbusClientMixin(Generic[T]):  # pylint: disable=too-many-public-methods
 
     @classmethod
     def _convert_from_string(cls, value: str, string_encoding: str) -> bytes:
-        if not isinstance(value, str):
-            raise TypeError(f"Value should be string but is {type(value)}.")
         try:
             byte_list = value.encode(string_encoding)
         except LookupError as e:
@@ -803,7 +802,7 @@ class ModbusClientMixin(Generic[T]):  # pylint: disable=too-many-public-methods
         return byte_list
 
     @classmethod
-    def _convert_from_number(cls, data_type: DATATYPE, value: int | float) -> bytes:
+    def _convert_from_number(cls, data_type: DATATYPE, value: int | float | list[bool] | list[int] | list[float]) -> bytes:
         if not isinstance(value, list):
             value = cast(list[int], [value])
         byte_list = bytearray()

@@ -775,6 +775,8 @@ class ModbusClientMixin(Generic[T]):  # pylint: disable=too-many-public-methods
                 raise TypeError(f"Value should be string but is {type(value)}.")
             byte_list = cls._convert_from_string(value, string_encoding)
         else:
+            if isinstance(value, str):
+                raise TypeError(f"Expected value to be {data_type}, but is string.")
             byte_list = cls._convert_from_number(data_type, value)
         regs = [
             int.from_bytes(byte_list[x : x + 2], "big")

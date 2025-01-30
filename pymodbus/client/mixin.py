@@ -708,29 +708,31 @@ class ModbusClientMixin(Generic[T]):  # pylint: disable=too-many-public-methods
         :raises ParameterException: when the specified string encoding is not supported
         """
         if not (data_len := data_type.value[1]):
-            byte_list = bytearray()
-            if word_order == "little":
-                registers.reverse()
-            for x in registers:
-                byte_list.extend(int.to_bytes(x, 2, "big"))
+            byte_list = cls._convert_to_bytearray(registers, word_order)
             if data_type == cls.DATATYPE.STRING:
-                trailing_nulls_begin = len(byte_list)
-                while trailing_nulls_begin > 0 and not byte_list[trailing_nulls_begin - 1]:
-                    trailing_nulls_begin -= 1
-                byte_list = byte_list[:trailing_nulls_begin]
-                try:
-                    return byte_list.decode(string_encoding)
-                except LookupError as e:
-                    raise ParameterException(str(e)) from e
+                return cls._convert_to_string(byte_list, string_encoding)
             return unpack_bitstring(byte_list)
+
+        return cls._convert_to_number(registers, data_type, data_len, word_order)
+
+    @classmethod
+    def _convert_to_bytearray(cls, registers: list[int], word_order: Literal["big", "little"]) -> bytearray:
+        byte_list = bytearray()
+        if word_order == "little":
+            registers.reverse()
+        for x in registers:
+            byte_list.extend(int.to_bytes(x, 2, "big"))
+        return byte_list
+
+    @classmethod
+    def _convert_to_number(cls, registers: list[int], data_type: DATATYPE, data_len: int, word_order: Literal["big", "little"]) -> int | float | list[int] | list[float]:
         if (reg_len := len(registers)) % data_len:
             raise ModbusException(
                 f"Registers illegal size ({len(registers)}) expected multiple of {data_len}!"
             )
-
         result = []
         for i in range(0, reg_len, data_len):
-            regs = registers[i:i+data_len]
+            regs = registers[i:i + data_len]
             if word_order == "little":
                 regs.reverse()
             byte_list = bytearray()
@@ -738,6 +740,17 @@ class ModbusClientMixin(Generic[T]):  # pylint: disable=too-many-public-methods
                 byte_list.extend(int.to_bytes(x, 2, "big"))
             result.append(struct.unpack(f">{data_type.value[0]}", byte_list)[0])
         return result if len(result) != 1 else result[0]
+
+    @classmethod
+    def _convert_to_string(cls, byte_list: bytearray, string_encoding: str) -> str:
+        trailing_nulls_begin = len(byte_list)
+        while trailing_nulls_begin > 0 and not byte_list[trailing_nulls_begin - 1]:
+            trailing_nulls_begin -= 1
+        byte_list = byte_list[:trailing_nulls_begin]
+        try:
+            return byte_list.decode(string_encoding)
+        except LookupError as e:
+            raise ParameterException(str(e)) from e
 
     @classmethod
     def convert_to_registers(
@@ -754,26 +767,11 @@ class ModbusClientMixin(Generic[T]):  # pylint: disable=too-many-public-methods
         :raises ParameterException: when the specified string encoding is not supported
         """
         if data_type == cls.DATATYPE.BITS:
-            if not isinstance(value, list):
-                raise TypeError(f"Value should be list of bool but is {type(value)}.")
-            if (missing := len(value) % 16):
-                value = value + [False] * (16 - missing)
-            byte_list = pack_bitstring(cast(list[bool], value))
+            byte_list = cls._convert_from_bits(value)
         elif data_type == cls.DATATYPE.STRING:
-            if not isinstance(value, str):
-                raise TypeError(f"Value should be string but is {type(value)}.")
-            try:
-                byte_list = value.encode(string_encoding)
-            except LookupError as e:
-                raise ParameterException(str(e)) from e
-            if len(byte_list) % 2:
-                byte_list += b"\x00"
+            byte_list = cls._convert_from_string(value, string_encoding)
         else:
-            if not isinstance(value, list):
-                value = cast(list[int], [value])
-            byte_list = bytearray()
-            for v in value:
-                byte_list.extend(struct.pack(f">{data_type.value[0]}", v))
+            byte_list = cls._convert_from_number(data_type, value)
         regs = [
             int.from_bytes(byte_list[x : x + 2], "big")
             for x in range(0, len(byte_list), 2)
@@ -781,3 +779,34 @@ class ModbusClientMixin(Generic[T]):  # pylint: disable=too-many-public-methods
         if word_order == "little":
             regs.reverse()
         return regs
+
+    @classmethod
+    def _convert_from_bits(cls, value: list[bool] | list[int] | list[float]) -> bytes:
+        if not isinstance(value, list):
+            raise TypeError(
+                f"Value should be list of bool but is {type(value)}.")
+        if (missing := len(value) % 16):
+            value = value + [False] * (16 - missing)
+        byte_list = pack_bitstring(cast(list[bool], value))
+        return byte_list
+
+    @classmethod
+    def _convert_from_string(cls, value: str, string_encoding: str) -> bytes:
+        if not isinstance(value, str):
+            raise TypeError(f"Value should be string but is {type(value)}.")
+        try:
+            byte_list = value.encode(string_encoding)
+        except LookupError as e:
+            raise ParameterException(str(e)) from e
+        if len(byte_list) % 2:
+            byte_list += b"\x00"
+        return byte_list
+
+    @classmethod
+    def _convert_from_number(cls, data_type: DATATYPE, value: int | float) -> bytes:
+        if not isinstance(value, list):
+            value = cast(list[int], [value])
+        byte_list = bytearray()
+        for v in value:
+            byte_list.extend(struct.pack(f">{data_type.value[0]}", v))
+        return byte_list
